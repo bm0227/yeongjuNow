@@ -18,12 +18,13 @@ from konlpy.tag import Okt
 st.set_page_config(page_title="영주 Now AI 가이드", page_icon="🍔", layout="wide")
 
 st.title(" 🚀 영주시 공공데이터 기반 AI 하이브리드 맛집 추천 엔진")
-st.markdown("사용자의 구체적인 **상황(Context)**을 분석하여 가장 부합하는 영주 맛집 및 안심식당을 추천합니다.")
+st.markdown("사용자의 구체적인 상황(Context)을 분석하여 가장 부합하는 영주 맛집 및 안심식당을 추천합니다.")
 
-# --- 1. 데이터 로드 및 캐싱 (매번 새로 로드하지 않도록 방지) ---
+# --- 1. 데이터 로드 및 캐싱 ---
 @st.cache_data
 def load_data():
-    df = pd.read_csv("master_db.csv", encoding="utf-8")
+    # 깃허브에 올린 실제 CSV 파일명으로 로드 (한글 깨짐 방지 utf-8)
+    df = pd.read_csv("master_db.csv", encoding="utf-8") 
     return df
 
 df = load_data()
@@ -35,63 +36,71 @@ def get_recommendations(user_input, df):
     def tokenize(text):
         tokens = okt.pos(text, stem=True)
         return [word for word, pos in tokens if pos in ['Noun', 'Adjective']]
-
-    # 식당 설명문 전처리
-    df['clean_desc'] = df['description'].apply(lambda x: " ".join(tokenize(x)))
+    
+    # 🚨 주의: 'combined_텍스트' 부분을 엑셀 맨 오른쪽에 있던 실제 컬럼명으로 꼭 바꿔주세요! (예: combined_text)
+    text_column_name = 'combined_텍스트' 
+    
+    # 결측치(NaN)를 빈 문자열로 채우고 전처리
+    df[text_column_name] = df[text_column_name].fillna("")
+    df['clean_desc'] = df[text_column_name].apply(lambda x: " ".join(tokenize(str(x))))
+    
     user_clean = " ".join(tokenize(user_input))
-
+    
     if not user_clean:
         return pd.DataFrame()
-
+    
     # TF-IDF 벡터화 및 코사인 유사도 계산
     vectorizer = TfidfVectorizer()
     tfidf_matrix = vectorizer.fit_transform(df['clean_desc'])
     user_vector = vectorizer.transform([user_clean])
-
+    
     sim_scores = cosine_similarity(user_vector, tfidf_matrix).flatten()
-
-    # 하이브리드 스코어링 (코사인 유사도 + 안심식당 가중치 0.2)
-    final_scores = sim_scores + (df['is_safe'] * 0.2)
-
+    
+    # 하이브리드 스코어링 (코사인 유사도 + 안심식당(is_safe_res) 가중치 0.2)
+    # 엑셀의 is_safe_res 컬럼 사용
+    final_scores = sim_scores + (pd.to_numeric(df['is_safe_res'], errors='coerce').fillna(0) * 0.2)
+    
     df['추천 점수'] = final_scores
     return df.sort_values(by='추천 점수', ascending=False).head(3)
 
 # --- 3. 웹 UI 레이아웃 구성 ---
-# 왼쪽 사이드바: 상황 입력창
 with st.sidebar:
     st.header("🔍 상황 입력창")
     user_situation = st.text_input(
-        "어떤 식당을 찾으시나요?",
-        placeholder="예: 부모님 모시고 갈 조용한 한정식 맛집"
+        "어떤 식당을 찾으시나요?", 
+        placeholder="예: 부모님 모시고 갈 조용한 보양식 맛집"
     )
     search_button = st.button("AI 추천 시작")
 
-# 오른쪽 메인 화면: 결과 출력
 if search_button and user_situation:
     with st.spinner("AI가 영주시 공공데이터를 융합하여 분석 중입니다..."):
         results = get_recommendations(user_situation, df)
-
+        
         if results.empty:
             st.warning("입력하신 상황과 매칭되는 식당을 찾지 못했습니다. 다른 키워드로 입력해 보세요!")
         else:
             st.subheader("🎯 AI 선정 TOP 3 추천 결과")
-
-            # 2단 레이아웃 (좌측: 카드 형태의 정보, 우측: 지도)
+            
             col1, col2 = st.columns([1, 1])
-
+            
             with col1:
                 for idx, row in results.iterrows():
-                    safe_badge = "✅ 안심식당" if row['is_safe'] == 1 else "❌ 일반식당"
-                    st.info(f"### **{row['상호명']}** ({safe_badge})")
-                    st.write(f"📍 **주소:** {row['주소']}")
-                    st.write(f"📝 **특징:** {row['description']}")
+                    # 엑셀의 BSSH_NM(상호명), ADRES(주소), is_safe_res(안심식당) 컬럼 사용
+                    safe_badge = "✅ 안심식당" if str(row['is_safe_res']).strip() == '1' else "❌ 일반식당"
+                    
+                    st.info(f"### **{row['BSSH_NM']}** ({safe_badge})")
+                    st.write(f"📍 **주소:** {row['ADRES']}")
+                    
+                    # 🚨 여기도 위에서 적은 실제 컬럼명과 똑같이 맞춰주세요!
+                    st.write(f"📝 **특징:** {row['combined_텍스트']}")
+                    
                     st.write(f"📊 **매칭 점수:** {row['추천 점수']:.2f}")
                     st.write("---")
-
+            
             with col2:
                 st.markdown("### 🗺️ 추천 식당 위치")
-                # 위도, 경도 컬럼명을 가진 데이터프레임을 주면 Streamlit이 자동으로 지도를 그려줍니다!
-                map_data = results[['latitude', 'longitude']]
+                # latitude, longitude 컬럼을 사용해 지도에 점을 찍습니다.
+                map_data = results[['latitude', 'longitude']].dropna()
                 st.map(map_data)
 else:
     st.info("왼쪽 사이드바에 원하는 상황을 입력하고 버튼을 눌러보세요! 지도가 자동으로 연동됩니다.")
