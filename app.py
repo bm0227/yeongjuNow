@@ -17,8 +17,9 @@ from konlpy.tag import Okt
 # --- 0. 페이지 기본 설정 ---
 st.set_page_config(page_title="영주 Now AI 가이드", page_icon="🍔", layout="wide")
 
-st.title(" 🚀 영주 Now")
-st.markdown("영주시 공공데이터 기반 AI 하이브리드 맛집 추천 엔진\n사용자의 구체적인 상황(Context)을 분석하여 가장 부합하는 영주 맛집 및 안심식당을 추천합니다.")
+st.title(" 🚀 영주 나우")
+st.markdown("영주시 공공데이터 기반 AI 하이브리드 맛집 추천 엔진")
+st.markdown("사용자의 구체적인 상황(Context)을 분석하여 가장 부합하는 영주 맛집 및 안심식당을 추천합니다.")
 
 # --- 1. 데이터 로드 및 캐싱 ---
 @st.cache_data
@@ -31,6 +32,7 @@ df = load_data()
 okt = Okt()
 
 text_column_name = [col for col in df.columns if col.startswith('combined_')][0]
+safe_column_name = [col for col in df.columns if col.startswith('is_safe_')][0]
 
 # --- 2. 자연어 처리 및 추천 알고리즘 함수 ---
 def get_recommendations(user_input, df, text_col):
