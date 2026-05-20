@@ -30,21 +30,18 @@ def load_data():
 df = load_data()
 okt = Okt()
 
-st.write(df.columns)
+text_column_name = [col for col in df.columns if col.startswith('combined_')][0]
 
 # --- 2. 자연어 처리 및 추천 알고리즘 함수 ---
-def get_recommendations(user_input, df):
+def get_recommendations(user_input, df, text_col):
     # 형태소 분석 (명사, 형용사 추출)
     def tokenize(text):
         tokens = okt.pos(text, stem=True)
         return [word for word, pos in tokens if pos in ['Noun', 'Adjective']]
     
-    # 🚨 주의: 'combined_텍스트' 부분을 엑셀 맨 오른쪽에 있던 실제 컬럼명으로 꼭 바꿔주세요! (예: combined_text)
-    text_column_name = 'combined_텍스트' 
-    
     # 결측치(NaN)를 빈 문자열로 채우고 전처리
-    df[text_column_name] = df[text_column_name].fillna("")
-    df['clean_desc'] = df[text_column_name].apply(lambda x: " ".join(tokenize(str(x))))
+    df[text_col] = df[text_col].fillna("")
+    df['clean_desc'] = df[text_col].apply(lambda x: " ".join(tokenize(str(x))))
     
     user_clean = " ".join(tokenize(user_input))
     
@@ -59,7 +56,6 @@ def get_recommendations(user_input, df):
     sim_scores = cosine_similarity(user_vector, tfidf_matrix).flatten()
     
     # 하이브리드 스코어링 (코사인 유사도 + 안심식당(is_safe_res) 가중치 0.2)
-    # 엑셀의 is_safe_res 컬럼 사용
     final_scores = sim_scores + (pd.to_numeric(df['is_safe_res'], errors='coerce').fillna(0) * 0.2)
     
     df['추천 점수'] = final_scores
@@ -76,7 +72,7 @@ with st.sidebar:
 
 if search_button and user_situation:
     with st.spinner("AI가 영주시 공공데이터를 융합하여 분석 중입니다..."):
-        results = get_recommendations(user_situation, df)
+        results = get_recommendations(user_situation, df, text_column_name)
         
         if results.empty:
             st.warning("입력하신 상황과 매칭되는 식당을 찾지 못했습니다. 다른 키워드로 입력해 보세요!")
@@ -87,21 +83,19 @@ if search_button and user_situation:
             
             with col1:
                 for idx, row in results.iterrows():
-                    # 엑셀의 BSSH_NM(상호명), ADRES(주소), is_safe_res(안심식당) 컬럼 사용
                     safe_badge = "✅ 안심식당" if str(row['is_safe_res']).strip() == '1' else "❌ 일반식당"
                     
                     st.info(f"### **{row['BSSH_NM']}** ({safe_badge})")
                     st.write(f"📍 **주소:** {row['ADRES']}")
                     
-                    # 🚨 여기도 위에서 적은 실제 컬럼명과 똑같이 맞춰주세요!
-                    st.write(f"📝 **특징:** {row['combined_텍스트']}")
+                    # 방금 찾은 진짜 컬럼명으로 텍스트를 출력합니다.
+                    st.write(f"📝 **특징:** {row[text_column_name]}")
                     
                     st.write(f"📊 **매칭 점수:** {row['추천 점수']:.2f}")
                     st.write("---")
             
             with col2:
                 st.markdown("### 🗺️ 추천 식당 위치")
-                # latitude, longitude 컬럼을 사용해 지도에 점을 찍습니다.
                 map_data = results[['latitude', 'longitude']].dropna()
                 st.map(map_data)
 else:
