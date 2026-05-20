@@ -35,7 +35,7 @@ text_column_name = [col for col in df.columns if col.startswith('combined_')][0]
 safe_column_name = [col for col in df.columns if col.startswith('is_safe_')][0]
 
 # --- 2. 자연어 처리 및 추천 알고리즘 함수 ---
-def get_recommendations(user_input, df, text_col):
+def get_recommendations(user_input, df, text_col, safe_col):
     # 형태소 분석 (명사, 형용사 추출)
     def tokenize(text):
         tokens = okt.pos(text, stem=True)
@@ -57,8 +57,7 @@ def get_recommendations(user_input, df, text_col):
     
     sim_scores = cosine_similarity(user_vector, tfidf_matrix).flatten()
     
-    # 하이브리드 스코어링 (코사인 유사도 + 안심식당(is_safe_res) 가중치 0.2)
-    final_scores = sim_scores + (pd.to_numeric(df['is_safe_res'], errors='coerce').fillna(0) * 0.2)
+    final_scores = sim_scores + (pd.to_numeric(df[safe_col], errors='coerce').fillna(0) * 0.2)
     
     df['추천 점수'] = final_scores
     return df.sort_values(by='추천 점수', ascending=False).head(3)
@@ -74,7 +73,7 @@ with st.sidebar:
 
 if search_button and user_situation:
     with st.spinner("AI가 영주시 공공데이터를 융합하여 분석 중입니다..."):
-        results = get_recommendations(user_situation, df, text_column_name)
+        results = get_recommendations(user_situation, df, text_column_name, safe_column_name)
         
         if results.empty:
             st.warning("입력하신 상황과 매칭되는 식당을 찾지 못했습니다. 다른 키워드로 입력해 보세요!")
@@ -85,14 +84,11 @@ if search_button and user_situation:
             
             with col1:
                 for idx, row in results.iterrows():
-                    safe_badge = "✅ 안심식당" if str(row['is_safe_res']).strip() == '1' else "❌ 일반식당"
+                    safe_badge = "✅ 안심식당" if str(row[safe_column_name]).strip() == '1' else "❌ 일반식당"
                     
                     st.info(f"### **{row['BSSH_NM']}** ({safe_badge})")
                     st.write(f"📍 **주소:** {row['ADRES']}")
-                    
-                    # 방금 찾은 진짜 컬럼명으로 텍스트를 출력합니다.
                     st.write(f"📝 **특징:** {row[text_column_name]}")
-                    
                     st.write(f"📊 **매칭 점수:** {row['추천 점수']:.2f}")
                     st.write("---")
             
