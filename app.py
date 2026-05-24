@@ -34,19 +34,38 @@ okt = Okt()
 text_column_name = [col for col in df.columns if col.startswith('combined_')][0]
 safe_column_name = [col for col in df.columns if col.startswith('is_safe_')][0]
 
-# --- 2. 자연어 처리 및 추천 알고리즘 함수 ---
-def get_recommendations(user_input, df, text_col, safe_col):
+# --- 2. 하버사인 거리 계산 함수 (위도, 경도 기반) ---
+def calculate_distance(lat1, lon1, lat2, lon2):
+    R = 6371.0 # 지구 반지름 (km)
+    lat1, lon1, lat2, lon2 = map(np.radians, [lat1, lon1, lat2, lon2])
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    a = np.sin(dlat/2.0)**2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon/2.0)**2
+    c = 2 * np.arcsin(np.sqrt(a))
+    return R * c
+
+# --- 3. 자연어 처리 및 추천 알고리즘 함수 ---
+def get_recommendations(user_input, df_original, text_col, safe_col, user_lat=None, user_lon=None, max_dist=5.0):
+    df = df_original.copy()
+    
+    # 📍 사용자 위치가 있을 경우 거리 계산 및 필터링
+    if user_lat is not None and user_lon is not None:
+        df['distance_km'] = calculate_distance(user_lat, user_lon, df['latitude'], df['longitude'])
+        # 설정된 반경(max_dist) 이내의 식당만 남김
+        df = df[df['distance_km'] <= max_dist]
+        
+    if df.empty:
+        return pd.DataFrame()
+
     # 형태소 분석 (명사, 형용사 추출)
     def tokenize(text):
         tokens = okt.pos(text, stem=True)
         return [word for word, pos in tokens if pos in ['Noun', 'Adjective']]
     
-    # 결측치(NaN)를 빈 문자열로 채우고 전처리
     df[text_col] = df[text_col].fillna("")
     df['clean_desc'] = df[text_col].apply(lambda x: " ".join(tokenize(str(x))))
     
     user_clean = " ".join(tokenize(user_input))
-    
     if not user_clean:
         return pd.DataFrame()
     
@@ -54,16 +73,37 @@ def get_recommendations(user_input, df, text_col, safe_col):
     vectorizer = TfidfVectorizer()
     tfidf_matrix = vectorizer.fit_transform(df['clean_desc'])
     user_vector = vectorizer.transform([user_clean])
-    
     sim_scores = cosine_similarity(user_vector, tfidf_matrix).flatten()
     
-    final_scores = sim_scores + (pd.to_numeric(df[safe_col], errors='coerce').fillna(0) * 0.2)
+    # 기본 점수 = 상황 유사도 + 안심식당 가점(0.2)
+    safe_scores = pd.to_numeric(df[safe_col], errors='coerce').fillna(0).values * 0.2
+    final_scores = sim_scores + safe_scores
+    
+    # 📍 위치 기반 거리 가점 부여 (거리가 가까울수록 최대 0.2점 추가)
+    if user_lat is not None and user_lon is not None:
+        distance_scores = np.maximum(0, 1 - (df['distance_km'] / max_dist)) * 0.2
+        final_scores += distance_scores
     
     df['추천 점수'] = final_scores
     return df.sort_values(by='추천 점수', ascending=False).head(3)
 
-# --- 3. 웹 UI 레이아웃 구성 ---
+# --- 4. 웹 UI 레이아웃 구성 ---
 with st.sidebar:
+    st.header("📍 내 위치 가져오기")
+    st.markdown("버튼을 눌러 현재 위치를 허용해주세요.")
+    # 위치 정보 받아오기 컴포넌트
+    location = streamlit_geolocation()
+    
+    user_lat, user_lon = None, None
+    if location and location.get('latitude') and location.get('longitude'):
+        user_lat = location['latitude']
+        user_lon = location['longitude']
+        st.success("✅ 위치 정보 수신 완료!")
+    
+    # 검색 반경 설정 슬라이더
+    max_distance = st.slider("최대 검색 반경 (km)", min_value=1.0, max_value=20.0, value=5.0, step=0.5)
+    st.divider()
+
     st.header("🔍 상황 입력창")
     user_situation = st.text_input(
         "어떤 식당을 찾으시나요?", 
@@ -72,11 +112,14 @@ with st.sidebar:
     search_button = st.button("AI 추천 시작")
 
 if search_button and user_situation:
-    with st.spinner("AI가 영주시 공공데이터를 융합하여 분석 중입니다..."):
-        results = get_recommendations(user_situation, df, text_column_name, safe_column_name)
+    with st.spinner("AI가 영주시 공공데이터 및 위치 정보를 융합하여 분석 중입니다..."):
+        results = get_recommendations(user_situation, df, text_column_name, safe_column_name, user_lat, user_lon, max_distance)
         
         if results.empty:
-            st.warning("입력하신 상황과 매칭되는 식당을 찾지 못했습니다. 다른 키워드로 입력해 보세요!")
+            if user_lat and user_lon:
+                st.warning(f"설정하신 반경 {max_distance}km 내에 입력하신 상황과 매칭되는 식당을 찾지 못했습니다. 반경을 넓히거나 다른 키워드로 입력해 보세요!")
+            else:
+                st.warning("입력하신 상황과 매칭되는 식당을 찾지 못했습니다. 다른 키워드로 입력해 보세요!")
         else:
             st.subheader("🎯 AI 선정 TOP 3 추천 결과")
             
@@ -88,13 +131,25 @@ if search_button and user_situation:
                     
                     st.info(f"### **{row['BSSH_NM']}** ({safe_badge})")
                     st.write(f"📍 **주소:** {row['ADRES']}")
+                    
+                    # 거리가 계산된 경우 UI에 함께 출력
+                    if 'distance_km' in row:
+                        st.write(f"🚶 **거리:** 내 위치로부터 약 **{row['distance_km']:.1f} km**")
+                        
                     st.write(f"📝 **특징:** {row[text_column_name]}")
-                    st.write(f"📊 **매칭 점수:** {row['추천 점수']:.2f}")
+                    st.write(f"📊 **종합 매칭 점수:** {row['추천 점수']:.2f}")
                     st.write("---")
             
             with col2:
                 st.markdown("### 🗺️ 추천 식당 위치")
                 map_data = results[['latitude', 'longitude']].dropna()
+                
+                # 사용자의 현재 위치가 있다면 맵에 중심을 맞추기 위해 데이터 추가
+                if user_lat and user_lon:
+                    user_df = pd.DataFrame({'latitude': [user_lat], 'longitude': [user_lon], 'color': ['#FF0000']})
+                    # Streamlit st.map()은 색상 구분이 제한적이므로, 식당 위치만 먼저 찍어줍니다. 
+                    # (더 고도화할 경우 pydeck이나 folium을 활용할 수 있습니다.)
+                
                 st.map(map_data)
 else:
-    st.info("왼쪽 사이드바에 원하는 상황을 입력하고 버튼을 눌러보세요! 지도가 자동으로 연동됩니다.")
+    st.info("왼쪽 사이드바에서 현재 위치를 받아오고, 원하는 상황을 입력한 뒤 버튼을 눌러보세요!")
