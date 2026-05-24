@@ -13,13 +13,36 @@ import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from konlpy.tag import Okt
+from streamlit_geolocation import streamlit_geolocation
 
 # --- 0. 페이지 기본 설정 ---
-st.set_page_config(page_title="영주 Now AI 가이드", page_icon="🍔", layout="wide")
+st.set_page_config(
+    page_title="영주 Now | AI 하이브리드 맛집 가이드", 
+    page_icon="🍽️", 
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-st.title(" 🚀 영주 나우")
-st.markdown("영주시 공공데이터 기반 AI 하이브리드 맛집 추천 엔진")
-st.markdown("사용자의 구체적인 상황(Context)을 분석하여 가장 부합하는 영주 맛집 및 안심식당을 추천합니다.")
+st.title("🚀 영주 나우 (Yeongju Now)")
+st.markdown("#### 영주시 공공데이터 기반 거리맞춤형 AI 하이브리드 추천 엔진")
+
+# st.info를 사용하여 시각적으로 눈에 띄는 소개말 작성
+st.info(
+    "**영주시가 공식 인증한 250곳의 맛집 및 안심식당** 데이터를 융합하여 구축한 자체 추천 모델입니다. "
+    "사용자의 구체적인 **상황(Context)**을 분석하고 **현재 위치와의 거리**를 계산하여, "
+    "지금 당장 가기 좋은 가장 안전하고 맛있는 로컬 식당을 제안합니다."
+)
+
+# 주요 특징을 마크다운 불릿 포인트로 깔끔하게 나열
+st.markdown(
+    """
+    **📌 영주 나우 100% 활용 포인트**
+    * 📍 **내 주변 우선 추천:** 현재 위치를 기반으로 거리가 가까운 검증된 맛집을 먼저 찾아줍니다.
+    * 🧠 **상황 맞춤 AI:** "부모님과 함께 갈 조용한 곳", "비 오는 날 어울리는 국물" 등 원하는 상황을 자유롭게 입력해 보세요.
+    * 🛡️ **안심 방문:** 영주시가 공인한 250개의 엄선된 데이터베이스로 위생과 맛이 보장된 곳만 추천합니다.
+    """
+)
+st.divider()
 
 # --- 1. 데이터 로드 및 캐싱 ---
 @st.cache_data
